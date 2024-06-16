@@ -37,6 +37,19 @@ Run the `hats` server:
 hats -sub_stream='{"name":"ORDERS","consumers":[{"durable_name":"ORDERS_CONS"}]}'
 ```
 
+> For complex scenarios, you can also use a config file:
+>
+> ```bash
+> $ cat hats.yaml
+> sub:
+>   streams:
+>   - name: ORDERS
+>     consumers:
+>     - durable_name: ORDERS_CONS
+>
+> $ hats -config=hats.yaml
+> ```
+
 Publish a message:
 
 ```bash

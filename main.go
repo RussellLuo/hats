@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"sigs.k8s.io/yaml"
 )
 
 type streamFlags []string
@@ -25,28 +28,58 @@ func (s *streamFlags) Set(value string) error {
 }
 
 type Config struct {
-	serverAddr string
-	serverKey  string
-	natsURL    string
-	sub        SubscriberConfig
+	RawConfig string `json:"-"`
+
+	ServerAddr string           `json:"server_addr"`
+	ServerKey  string           `json:"server_key"`
+	NatsURL    string           `json:"nats_url"`
+	Sub        SubscriberConfig `json:"sub"`
 }
 
 func (cfg *Config) init() error {
+	if err := cfg.parse(); err != nil {
+		return err
+	}
+
+	// Use the server's key for authentication if it's the test webhook.
+	testWebhookURL := fmt.Sprintf("http://127.0.0.1%s/webhook", cfg.ServerAddr)
+	if cfg.Sub.Webhook.URL == testWebhookURL {
+		cfg.Sub.Webhook.Key = cfg.ServerKey
+	}
+
+	return nil
+}
+
+func (cfg *Config) parse() error {
+	// If config file is specified, read the configuration from it.
+	if cfg.RawConfig != "" {
+		return cfg.load(cfg.RawConfig)
+	}
+
 	for _, streamCfgStr := range streams {
 		var streamCfg StreamConfig
 		if err := json.Unmarshal([]byte(streamCfgStr), &streamCfg); err != nil {
 			return err
 		}
-		cfg.sub.Streams = append(cfg.sub.Streams, streamCfg)
-	}
-
-	// Use the server's key for authentication if it's the test webhook.
-	testWebhookURL := fmt.Sprintf("http://127.0.0.1%s/webhook", cfg.serverAddr)
-	if cfg.sub.Webhook.URL == testWebhookURL {
-		cfg.sub.Webhook.Key = cfg.serverKey
+		cfg.Sub.Streams = append(cfg.Sub.Streams, streamCfg)
 	}
 
 	return nil
+}
+
+func (cfg *Config) load(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	switch ext := filepath.Ext(path); ext {
+	case ".yaml":
+		return yaml.Unmarshal(data, cfg)
+	case ".json":
+		return json.Unmarshal(data, cfg)
+	default:
+		return fmt.Errorf("unsupported config file format: %s", ext)
+	}
 }
 
 var (
@@ -55,12 +88,13 @@ var (
 )
 
 func init() {
-	flag.StringVar(&cfg.serverAddr, "server_addr", ":8080", "The listen address of the server")
-	flag.StringVar(&cfg.serverKey, "server_key", "", "The auth key for the endpoints of the server")
-	flag.StringVar(&cfg.natsURL, "nats_url", nats.DefaultURL, "The URL of the NATS server")
+	flag.StringVar(&cfg.RawConfig, "config", "", "YAML/JSON file to read configuration from")
+	flag.StringVar(&cfg.ServerAddr, "server_addr", ":8080", "The listen address of the server")
+	flag.StringVar(&cfg.ServerKey, "server_key", "", "The auth key for the endpoints of the server")
+	flag.StringVar(&cfg.NatsURL, "nats_url", nats.DefaultURL, "The URL of the NATS server")
 	flag.Var(&streams, "sub_stream", "The JSON config of a single stream")
-	flag.StringVar(&cfg.sub.Webhook.URL, "sub_webhook_url", "http://127.0.0.1:8080/webhook", "The URL of the default webhook")
-	flag.StringVar(&cfg.sub.Webhook.Key, "sub_webhook_key", "", "The key of the default webhook")
+	flag.StringVar(&cfg.Sub.Webhook.URL, "sub_webhook_url", "http://127.0.0.1:8080/webhook", "The URL of the default webhook")
+	flag.StringVar(&cfg.Sub.Webhook.Key, "sub_webhook_key", "", "The key of the default webhook")
 }
 
 func main() {
@@ -73,7 +107,7 @@ func main() {
 	}
 
 	// Connect to the NATS server.
-	nc, err := nats.Connect(cfg.natsURL)
+	nc, err := nats.Connect(cfg.NatsURL)
 	if err != nil {
 		logger.Error("", "err", err)
 		return
@@ -89,7 +123,7 @@ func main() {
 	}
 
 	// Create a subscriber and add a subscription.
-	sub, err := NewSubscriber(logger, js, &cfg.sub)
+	sub, err := NewSubscriber(logger, js, &cfg.Sub)
 	if err != nil {
 		logger.Error("Error", "err", err)
 		return
@@ -105,7 +139,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(bearerAuth("example", cfg.serverKey))
+	r.Use(bearerAuth("example", cfg.ServerKey))
 
 	// Register the publisher.
 	pub := NewPublisher(logger, js)
@@ -115,8 +149,8 @@ func main() {
 	webhook := NewTestWebhook(logger)
 	r.Post("/webhook", webhook.Handle)
 
-	logger.Info("Publishing server running", "addr", cfg.serverAddr)
-	if err := http.ListenAndServe(cfg.serverAddr, r); err != nil {
+	logger.Info("Publishing server running", "addr", cfg.ServerAddr)
+	if err := http.ListenAndServe(cfg.ServerAddr, r); err != nil {
 		logger.Error("Error", "err", err)
 	}
 }

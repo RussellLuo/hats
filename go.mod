@@ -5,6 +5,7 @@ go 1.22.4
 require (
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/nats-io/nats.go v1.36.0
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require (

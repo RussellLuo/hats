@@ -15,10 +15,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const (
-	DurableConsumerName = "starship-billing-durable-consumer"
-)
-
 type Message struct {
 	Subject string              `json:"subject"`
 	Data    []byte              `json:"data"`
