@@ -11,6 +11,31 @@ Communicating with NATS using the HTTP protocol.
 go install github.com/RussellLuo/hats@latest
 ```
 
+<details open>
+  <summary> Usage </summary>
+
+```bash
+$ hats -h
+Usage of ./hats:
+  -config string
+    	YAML/JSON file to read configuration from
+  -nats string
+    	The URL of the NATS server (default "nats://127.0.0.1:4222")
+  -pub_addr string
+    	The listen address of the publishing server (default ":8080")
+  -pub_key string
+    	The auth key for the endpoints of the publishing server
+  -sub_stream -sub_stream
+    	The JSON config of a single stream (Set multiple -sub_stream for multiple streams)
+  -sub_webhook_key string
+    	The auth key of the default webhook
+  -sub_webhook_url string
+    	The URL of the default webhook (default "http://127.0.0.1:8080/webhook")
+```
+
+</details>
+
+
 ## Prerequisites
 
 Start a JetStream enabled NATS server ([docs][2]):

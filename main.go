@@ -5,12 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"sigs.k8s.io/yaml"
@@ -30,10 +27,9 @@ func (s *streamFlags) Set(value string) error {
 type Config struct {
 	RawConfig string `json:"-"`
 
-	ServerAddr string           `json:"server_addr"`
-	ServerKey  string           `json:"server_key"`
-	NatsURL    string           `json:"nats_url"`
-	Sub        SubscriberConfig `json:"sub"`
+	Nats   string           `json:"nats"`
+	Server ServerConfig     `json:"pub"`
+	Sub    SubscriberConfig `json:"sub"`
 }
 
 func (cfg *Config) init() error {
@@ -42,9 +38,9 @@ func (cfg *Config) init() error {
 	}
 
 	// Use the server's key for authentication if it's the test webhook.
-	testWebhookURL := fmt.Sprintf("http://127.0.0.1%s/webhook", cfg.ServerAddr)
+	testWebhookURL := fmt.Sprintf("http://127.0.0.1%s/webhook", cfg.Server.Addr)
 	if cfg.Sub.Webhook.URL == testWebhookURL {
-		cfg.Sub.Webhook.Key = cfg.ServerKey
+		cfg.Sub.Webhook.Key = cfg.Server.Key
 	}
 
 	return nil
@@ -89,12 +85,12 @@ var (
 
 func init() {
 	flag.StringVar(&cfg.RawConfig, "config", "", "YAML/JSON file to read configuration from")
-	flag.StringVar(&cfg.ServerAddr, "server_addr", ":8080", "The listen address of the server")
-	flag.StringVar(&cfg.ServerKey, "server_key", "", "The auth key for the endpoints of the server")
-	flag.StringVar(&cfg.NatsURL, "nats_url", nats.DefaultURL, "The URL of the NATS server")
-	flag.Var(&streams, "sub_stream", "The JSON config of a single stream")
+	flag.StringVar(&cfg.Nats, "nats", nats.DefaultURL, "The URL of the NATS server")
+	flag.StringVar(&cfg.Server.Addr, "pub_addr", ":8080", "The listen address of the publishing server")
+	flag.StringVar(&cfg.Server.Key, "pub_key", "", "The auth key for the endpoints of the publishing server")
+	flag.Var(&streams, "sub_stream", "The JSON config of a single stream (Set multiple `-sub_stream` for multiple streams)")
 	flag.StringVar(&cfg.Sub.Webhook.URL, "sub_webhook_url", "http://127.0.0.1:8080/webhook", "The URL of the default webhook")
-	flag.StringVar(&cfg.Sub.Webhook.Key, "sub_webhook_key", "", "The key of the default webhook")
+	flag.StringVar(&cfg.Sub.Webhook.Key, "sub_webhook_key", "", "The auth key of the default webhook")
 }
 
 func main() {
@@ -102,18 +98,18 @@ func main() {
 
 	flag.Parse()
 	if err := cfg.init(); err != nil {
-		logger.Error("", "err", err)
+		logger.Error("Error", "err", err)
 		return
 	}
 
 	// Connect to the NATS server.
-	nc, err := nats.Connect(cfg.NatsURL)
+	nc, err := nats.Connect(cfg.Nats)
 	if err != nil {
-		logger.Error("", "err", err)
+		logger.Error("Error", "err", err)
 		return
 	}
 	defer nc.Close()
-	slog.Info("Connected to NATS server", "url", nc.ConnectedUrl())
+	logger.Info("Connected to NATS server", "url", nc.ConnectedUrl())
 
 	// Create a JetStream management interface.
 	js, err := jetstream.New(nc)
@@ -134,43 +130,9 @@ func main() {
 	}
 	defer sub.Stop()
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(bearerAuth("example", cfg.ServerKey))
-
-	// Register the publisher.
 	pub := NewPublisher(logger, js)
-	r.Post("/pub", pub.Publish)
-
-	// Register a webhook handler for testing purpose.
-	webhook := NewTestWebhook(logger)
-	r.Post("/webhook", webhook.Handle)
-
-	logger.Info("Publishing server running", "addr", cfg.ServerAddr)
-	if err := http.ListenAndServe(cfg.ServerAddr, r); err != nil {
+	s := NewServer(logger, pub, &cfg.Server)
+	if err := s.Serve(); err != nil {
 		logger.Error("Error", "err", err)
-	}
-}
-
-// bearerAuth implements a simple middleware handler for adding Bearer Authentication to a route.
-func bearerAuth(realm string, token string) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if token == "" {
-				goto Next
-			}
-
-			if r.Header.Get("Authorization") != "Bearer "+token {
-				w.Header().Add("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s"`, realm))
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-
-		Next:
-			next.ServeHTTP(w, r)
-		})
 	}
 }

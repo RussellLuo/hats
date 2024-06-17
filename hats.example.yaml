@@ -1,0 +1,12 @@
+nats: nats://127.0.0.1:4222
+pub:
+  addr: :8080
+  key:
+sub:
+  streams:
+  - name: ORDERS
+    consumers:
+    - durable_name: ORDERS_CONS
+  webhook:
+    url: http://127.0.0.1:8080/webhook
+    key:

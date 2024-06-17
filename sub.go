@@ -3,80 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
-
-type Message struct {
-	Subject string              `json:"subject"`
-	Data    []byte              `json:"data"`
-	Header  map[string][]string `json:"header"`
-}
-
-func (m Message) LogArgs() []any {
-	return []any{
-		"subject", m.Subject,
-		"data", string(m.Data),
-		"header", fmt.Sprintf("%v", m.Header),
-	}
-}
-
-func (m Message) NatsMsg() *nats.Msg {
-	return &nats.Msg{
-		Subject: m.Subject,
-		Data:    m.Data,
-		Header:  m.Header,
-	}
-}
-
-// Publisher is a message publisher that receives messages from HTTP and publishes them to NATS JetStream.
-type Publisher struct {
-	logger *slog.Logger
-	js     jetstream.JetStream
-}
-
-func NewPublisher(logger *slog.Logger, js jetstream.JetStream) *Publisher {
-	return &Publisher{
-		logger: logger.With("in", "Publisher"),
-		js:     js,
-	}
-}
-
-func (p *Publisher) Publish(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	subject := query.Get("subject")
-	if subject == "" {
-		http.Error(w, `missing query parameter "subject"`, http.StatusBadRequest)
-		return
-	}
-
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to read body: %s", err.Error()), http.StatusBadRequest)
-		return
-	}
-
-	m := Message{
-		Subject: subject,
-		Data:    data,
-		Header:  getNatsHeader(r.Header),
-	}
-	p.logger.Info("Received message", m.LogArgs()...)
-
-	ctx := context.Background()
-	if _, err = p.js.PublishMsg(ctx, m.NatsMsg()); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-}
 
 type WebhookConfig struct {
 	URL string `json:"url"`
@@ -125,6 +59,7 @@ func NewSubscriber(logger *slog.Logger, js jetstream.JetStream, cfg *SubscriberC
 		if err != nil {
 			return nil, err
 		}
+
 		for _, consumerCfg := range streamCfg.Consumers {
 			consumer, err := getOrCreateConsumer(ctx, stream, consumerCfg.DurableName)
 			if err != nil {
@@ -141,7 +76,13 @@ func NewSubscriber(logger *slog.Logger, js jetstream.JetStream, cfg *SubscriberC
 				httpClient: cfg.HTTPClient,
 				webhook:    webhook,
 			})
+
+			logger.Info("Subscribing to messages", "stream", streamCfg.Name, "consumer", consumerCfg.DurableName)
 		}
+	}
+
+	if len(consumers) == 0 {
+		logger.Warn("No consumers configured")
 	}
 
 	return &Subscriber{
@@ -237,39 +178,6 @@ func (c *Consumer) send(msg jetstream.Msg) {
 	msg.Ack()
 }
 
-// TestWebhook is the default webhook for testing purpose.
-type TestWebhook struct {
-	logger *slog.Logger `json:"-"`
-}
-
-func NewTestWebhook(logger *slog.Logger) *TestWebhook {
-	return &TestWebhook{
-		logger: logger.With("in", "Webhook"),
-	}
-}
-
-func (tw *TestWebhook) Handle(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	subject := query.Get("subject")
-	if subject == "" {
-		http.Error(w, `missing query parameter "subject"`, http.StatusBadRequest)
-		return
-	}
-
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to read body: %s", err.Error()), http.StatusBadRequest)
-		return
-	}
-
-	m := Message{
-		Subject: subject,
-		Data:    data,
-		Header:  getNatsHeader(r.Header),
-	}
-	tw.logger.Info("Received message", m.LogArgs()...)
-}
-
 func getOrCreateStream(ctx context.Context, js jetstream.JetStream, streamName string) (jetstream.Stream, error) {
 	stream, err := js.Stream(ctx, streamName)
 	if err == nil {
@@ -297,14 +205,4 @@ func getOrCreateConsumer(ctx context.Context, stream jetstream.Stream, consumerN
 		DeliverPolicy: jetstream.DeliverAllPolicy,
 		MaxDeliver:    -1, // unlimited
 	})
-}
-
-func getNatsHeader(h map[string][]string) map[string][]string {
-	m := make(map[string][]string)
-	for key, values := range h {
-		if strings.HasPrefix(key, "Nats-") {
-			m[key] = values
-		}
-	}
-	return m
 }
