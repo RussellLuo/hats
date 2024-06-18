@@ -162,17 +162,12 @@ func (s *Server) Serve() error {
 func bearerAuth(realm string, token string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if token == "" {
-				goto Next
-			}
-
-			if r.Header.Get("Authorization") != "Bearer "+token {
+			// Only validate the token when it's not empty.
+			if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
 				w.Header().Add("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s"`, realm))
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-
-		Next:
 			next.ServeHTTP(w, r)
 		})
 	}

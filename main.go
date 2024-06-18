@@ -118,7 +118,7 @@ func main() {
 		return
 	}
 
-	// Create a subscriber and add a subscription.
+	// Create a subscriber and add subscriptions.
 	sub, err := NewSubscriber(logger, js, &cfg.Sub)
 	if err != nil {
 		logger.Error("Error", "err", err)
@@ -130,6 +130,7 @@ func main() {
 	}
 	defer sub.Stop()
 
+	// Create and start a publishing server.
 	pub := NewPublisher(logger, js)
 	s := NewServer(logger, pub, &cfg.Server)
 	if err := s.Serve(); err != nil {
