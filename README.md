@@ -16,7 +16,7 @@ go install github.com/RussellLuo/hats@latest
 
 ```bash
 $ hats -h
-Usage of ./hats:
+Usage of hats:
   -config string
     	YAML/JSON file to read configuration from
   -nats string

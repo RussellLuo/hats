@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -68,15 +69,29 @@ func (cfg *Config) load(path string) error {
 	if err != nil {
 		return err
 	}
+
+	evaluatedData := evaluateVars(data)
+
 	switch ext := filepath.Ext(path); ext {
 	case ".yaml":
-		return yaml.Unmarshal(data, cfg)
+		return yaml.Unmarshal(evaluatedData, cfg)
 	case ".json":
-		return json.Unmarshal(data, cfg)
+		return json.Unmarshal(evaluatedData, cfg)
 	default:
 		return fmt.Errorf("unsupported config file format: %s", ext)
 	}
 }
+
+// evaluateVars evaluates all environment variables in the form of "${VAR}" in src.
+func evaluateVars(src []byte) []byte {
+	result := reVar.ReplaceAllStringFunc(string(src), func(s string) string {
+		varName := s[len("${") : len(s)-len("}")]
+		return os.Getenv(varName)
+	})
+	return []byte(result)
+}
+
+var reVar = regexp.MustCompile(`(\${[^{}]*})`)
 
 var (
 	cfg     Config

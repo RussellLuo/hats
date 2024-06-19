@@ -1,7 +1,9 @@
-nats: nats://127.0.0.1:4222
+# Sensitive information can be stored in environment variables.
+# See examples in the following comments.
+nats: nats://127.0.0.1:4222 # nats://admin:${NATS_PASSWORD}@127.0.0.1:4222
 pub:
   addr: :8080
-  key:
+  key: '' # ${PUB_AUTH_KEY}
 sub:
   streams:
   - name: ORDERS
@@ -9,4 +11,4 @@ sub:
     - durable_name: ORDERS_CONS
   webhook:
     url: http://127.0.0.1:8080/webhook
-    key:
+    key: '' # ${WEBHOOK_AUTH_KEY}
