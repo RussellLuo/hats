@@ -4,6 +4,10 @@
 
 Communicating with NATS using the HTTP protocol.
 
+<p align="center">
+<img src="hats.drawio.png" height="200">
+</p>
+
 
 ## Installation
 
